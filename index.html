@@ -5,11 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Brújula Azimut, Rumbo, Coordenadas y Mapa UTM</title>
 
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
-
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
@@ -188,7 +184,7 @@
 
     .coord-actions {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       gap: 8px;
       margin-bottom: 10px;
     }
@@ -361,6 +357,39 @@
       white-space: nowrap;
     }
 
+    .captura-contenedor {
+      max-width: 720px;
+      height: auto;
+      max-height: 92vh;
+    }
+
+    .captura-body {
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .captura-body textarea {
+      width: 100%;
+      resize: vertical;
+      min-height: 180px;
+      border: 2px solid #111;
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 14px;
+      font-family: Consolas, monospace;
+    }
+
+    .captura-ayuda {
+      font-size: 13px;
+      color: #555;
+      line-height: 1.4;
+      border: 1px dashed #999;
+      border-radius: 10px;
+      padding: 10px;
+      background: #fafafa;
+    }
+
     @media (max-width: 650px) {
       body {
         padding: 6px;
@@ -388,6 +417,10 @@
 
       .mapa-contenedor {
         height: 94vh;
+      }
+
+      .captura-contenedor {
+        height: auto;
       }
 
       .mapa-header h2 {
@@ -429,7 +462,7 @@
       </div>
 
       <div class="estado" id="estado">
-        Toca “Activar brújula” y “Activar coordenadas”. Apunta la parte superior del teléfono hacia el objetivo.
+        Toca “Activar brújula” y “Activar coordenadas”, o captura una coordenada manualmente.
       </div>
 
       <div class="manual">
@@ -439,13 +472,14 @@
 
       <div class="coord-panel">
         <div class="coord-header">
-          <h2>Coordenadas GPS</h2>
+          <h2>Coordenadas</h2>
           <button id="copiarCoordsBtn">Copiar coordenadas</button>
         </div>
 
         <div class="coord-actions">
           <button id="abrirMapsBtn">Abrir en Google Maps</button>
           <button id="mapaCuadriculaBtn">Mapa con cuadrícula</button>
+          <button id="capturarCoordBtn">Capturar coordenada</button>
           <button id="verBtn">Ver registros</button>
         </div>
 
@@ -484,7 +518,7 @@
 
           <div class="extra-box">
             <span>Fuente</span>
-            <strong id="fuenteUbicacionTexto">GPS</strong>
+            <strong id="fuenteUbicacionTexto">---</strong>
           </div>
         </div>
       </div>
@@ -509,6 +543,7 @@
                 <th>GMS</th>
                 <th>GMD</th>
                 <th>UTM</th>
+                <th>Fuente</th>
               </tr>
             </thead>
             <tbody id="tabla"></tbody>
@@ -527,7 +562,41 @@
         <div id="mapa"></div>
 
         <div class="datos-mapa" id="datosMapa">
-          Activa las coordenadas GPS para mostrar el mapa.
+          Activa o captura una coordenada para mostrar el mapa.
+        </div>
+      </div>
+    </div>
+
+    <div class="mapa-modal" id="modalCaptura">
+      <div class="mapa-contenedor captura-contenedor">
+        <div class="mapa-header">
+          <h2>Capturar coordenada</h2>
+          <button id="cerrarCapturaBtn">Cerrar</button>
+        </div>
+
+        <div class="captura-body">
+          <label for="coordManualInput"><strong>Escribe o pega la coordenada</strong></label>
+
+          <textarea id="coordManualInput" rows="7" placeholder="Ejemplos:
+
+Decimal:
+32.514946, -117.038247
+
+GMS / DMS:
+32°30'53.81&quot;N, 117°02'17.69&quot;O
+
+GMD:
+32°30.8968'N, 117°02.2948'O
+
+UTM:
+Zona 11N E 496350 N 3597200"></textarea>
+
+          <div class="captura-ayuda">
+            Formatos aceptados: decimal, GMS/DMS, GMD y UTM WGS84.
+            Para Tijuana normalmente la zona UTM es 11N.
+          </div>
+
+          <button class="principal" id="usarCoordManualBtn">Usar coordenada capturada</button>
         </div>
       </div>
     </div>
@@ -561,9 +630,16 @@
     const copiarCoordsBtn = document.getElementById("copiarCoordsBtn");
     const abrirMapsBtn = document.getElementById("abrirMapsBtn");
     const mapaCuadriculaBtn = document.getElementById("mapaCuadriculaBtn");
+    const capturarCoordBtn = document.getElementById("capturarCoordBtn");
+
     const modalMapa = document.getElementById("modalMapa");
     const cerrarMapaBtn = document.getElementById("cerrarMapaBtn");
     const datosMapa = document.getElementById("datosMapa");
+
+    const modalCaptura = document.getElementById("modalCaptura");
+    const cerrarCapturaBtn = document.getElementById("cerrarCapturaBtn");
+    const usarCoordManualBtn = document.getElementById("usarCoordManualBtn");
+    const coordManualInput = document.getElementById("coordManualInput");
 
     const estado = document.getElementById("estado");
     const manual = document.getElementById("manual");
@@ -595,6 +671,7 @@
 
     function polar(cx, cy, r, grados) {
       const rad = (grados - 90) * Math.PI / 180;
+
       return [
         cx + Math.cos(rad) * r,
         cy + Math.sin(rad) * r
@@ -875,6 +952,7 @@
       if (valor === null) return;
 
       fijarAzimut(valor, origen);
+
       cambiarEstado(
         "Brújula activa. Mueve el teléfono en forma de 8 para calibrar mejor. Fuente: " + origen,
         "ok"
@@ -1062,6 +1140,304 @@
       };
     }
 
+    function formatearUbicacion(lat, lon, accuracy, altitude) {
+      const decimal = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+      const dms = `${convertirDMS(lat, "lat")}, ${convertirDMS(lon, "lon")}`;
+      const ddm = `${convertirDDM(lat, "lat")}, ${convertirDDM(lon, "lon")}`;
+      const utm = latLonAUTM(lat, lon);
+      const utmTexto = `Zona ${utm.zona}${utm.hemisferio}  E ${utm.easting.toFixed(2)}  N ${utm.northing.toFixed(2)}`;
+
+      coordDecimal.textContent = decimal;
+      coordDMS.textContent = dms;
+      coordDDM.textContent = ddm;
+      coordUTM.textContent = utmTexto;
+
+      precisionTexto.textContent = accuracy ? `± ${accuracy.toFixed(1)} m` : "---";
+      altitudTexto.textContent = altitude !== null && altitude !== undefined
+        ? `${altitude.toFixed(1)} m`
+        : "No disponible";
+
+      return {
+        decimal,
+        dms,
+        ddm,
+        utm: utmTexto
+      };
+    }
+
+    function activarUbicacion() {
+      if (!navigator.geolocation) {
+        cambiarEstado("Este navegador no permite obtener coordenadas GPS.", "error");
+        return;
+      }
+
+      cambiarEstado("Solicitando ubicación GPS...", "");
+
+      if (watchUbicacionId !== null) {
+        navigator.geolocation.clearWatch(watchUbicacionId);
+      }
+
+      watchUbicacionId = navigator.geolocation.watchPosition(
+        posicion => {
+          const c = posicion.coords;
+
+          const formatos = formatearUbicacion(
+            c.latitude,
+            c.longitude,
+            c.accuracy,
+            c.altitude
+          );
+
+          ultimaUbicacion = {
+            lat: c.latitude,
+            lon: c.longitude,
+            accuracy: c.accuracy,
+            altitude: c.altitude,
+            timestamp: posicion.timestamp,
+            fuenteUbicacion: "GPS",
+            formatos
+          };
+
+          fuenteUbicacionTexto.textContent = "GPS";
+
+          cambiarEstado(
+            `Coordenadas GPS activas. Precisión aproximada: ± ${c.accuracy.toFixed(1)} m.`,
+            "ok"
+          );
+
+          if (modalMapa.style.display === "flex") {
+            programarRedibujarCuadricula();
+          }
+        },
+        error => {
+          let mensaje = "No se pudo obtener la ubicación.";
+
+          if (error.code === 1) mensaje = "Permiso de ubicación denegado.";
+          if (error.code === 2) mensaje = "Ubicación no disponible.";
+          if (error.code === 3) mensaje = "Tiempo de espera agotado al obtener ubicación.";
+
+          cambiarEstado(mensaje, "error");
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 1000,
+          timeout: 15000
+        }
+      );
+    }
+
+    function parsearParteCoordenada(parte, tipo) {
+      const texto = parte.trim().toUpperCase();
+
+      let signo = 1;
+
+      if (texto.includes("-")) signo = -1;
+
+      if (tipo === "lat" && texto.includes("S")) signo = -1;
+      if (tipo === "lon" && (texto.includes("O") || texto.includes("W"))) signo = -1;
+
+      const nums = texto.match(/-?\d+(?:\.\d+)?/g);
+
+      if (!nums || nums.length === 0) {
+        throw new Error("No se encontraron números válidos.");
+      }
+
+      const valores = nums.map(Number).map(Math.abs);
+
+      let decimal = 0;
+
+      if (valores.length >= 3) {
+        decimal = valores[0] + valores[1] / 60 + valores[2] / 3600;
+      } else if (valores.length === 2) {
+        decimal = valores[0] + valores[1] / 60;
+      } else {
+        decimal = valores[0];
+      }
+
+      return decimal * signo;
+    }
+
+    function parsearCoordenadaUTM(texto) {
+      const limpio = texto
+        .replace(/,/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toUpperCase();
+
+      let match = limpio.match(/(?:ZONA\s*)?(\d{1,2})\s*([NS])?.*?\bE(?:STE)?\s*[:=]?\s*(\d+(?:\.\d+)?).*?\bN(?:ORTE)?\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+
+      if (!match) {
+        match = limpio.match(/(\d{1,2})([NS])\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)/i);
+      }
+
+      if (!match) {
+        return null;
+      }
+
+      const zona = Number(match[1]);
+      const hemisferio = match[2] || "N";
+      const easting = Number(match[3]);
+      const northing = Number(match[4]);
+
+      if (zona < 1 || zona > 60) {
+        throw new Error("La zona UTM debe estar entre 1 y 60.");
+      }
+
+      const p = utmALatLon(easting, northing, zona, hemisferio);
+
+      return {
+        lat: p.lat,
+        lon: p.lon
+      };
+    }
+
+    function parsearCoordenadasCapturadas(texto) {
+      const entrada = texto.trim();
+
+      if (!entrada) {
+        throw new Error("Escribe una coordenada.");
+      }
+
+      const utm = parsearCoordenadaUTM(entrada);
+
+      if (utm) {
+        return utm;
+      }
+
+      const tieneLetrasDireccion = /[NSEOWO]/i.test(entrada);
+      const tieneSimbolos = /[°'"’′″]/.test(entrada);
+
+      if (!tieneLetrasDireccion && !tieneSimbolos) {
+        const nums = entrada.match(/-?\d+(?:\.\d+)?/g);
+
+        if (nums && nums.length >= 2) {
+          const lat = Number(nums[0]);
+          const lon = Number(nums[1]);
+
+          if (lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+            return { lat, lon };
+          }
+        }
+      }
+
+      let partes = entrada.split(",");
+
+      if (partes.length < 2) {
+        const nums = entrada.match(/[NS].*?[EOW]|[EOW].*?[NS]/i);
+
+        if (!nums) {
+          throw new Error("No se pudo separar latitud y longitud. Usa coma entre ambas.");
+        }
+      }
+
+      if (partes.length < 2) {
+        throw new Error("No se pudo separar latitud y longitud. Usa coma entre ambas.");
+      }
+
+      const lat = parsearParteCoordenada(partes[0], "lat");
+      const lon = parsearParteCoordenada(partes.slice(1).join(","), "lon");
+
+      if (lat < -90 || lat > 90) {
+        throw new Error("La latitud debe estar entre -90 y 90.");
+      }
+
+      if (lon < -180 || lon > 180) {
+        throw new Error("La longitud debe estar entre -180 y 180.");
+      }
+
+      return { lat, lon };
+    }
+
+    function aplicarCoordenadaCapturada(lat, lon) {
+      const formatos = formatearUbicacion(lat, lon, null, null);
+
+      ultimaUbicacion = {
+        lat,
+        lon,
+        accuracy: null,
+        altitude: null,
+        timestamp: Date.now(),
+        fuenteUbicacion: "Capturada",
+        formatos
+      };
+
+      precisionTexto.textContent = "Capturada";
+      altitudTexto.textContent = "No disponible";
+      fuenteUbicacionTexto.textContent = "Manual";
+
+      cambiarEstado(
+        `Coordenada capturada: ${lat.toFixed(6)}, ${lon.toFixed(6)}`,
+        "ok"
+      );
+
+      if (modalMapa.style.display === "flex") {
+        programarRedibujarCuadricula();
+      }
+    }
+
+    function abrirCapturaCoordenada() {
+      modalCaptura.style.display = "flex";
+      setTimeout(() => coordManualInput.focus(), 100);
+    }
+
+    function cerrarCapturaCoordenada() {
+      modalCaptura.style.display = "none";
+    }
+
+    function usarCoordenadaCapturada() {
+      try {
+        const resultado = parsearCoordenadasCapturadas(coordManualInput.value);
+
+        aplicarCoordenadaCapturada(resultado.lat, resultado.lon);
+
+        cerrarCapturaCoordenada();
+      } catch (error) {
+        cambiarEstado("Error en coordenada capturada: " + error.message, "error");
+      }
+    }
+
+    function copiarCoordenadas() {
+      if (!ultimaUbicacion) {
+        cambiarEstado("Todavía no hay coordenadas para copiar.", "error");
+        return;
+      }
+
+      const texto = [
+        "COORDENADAS",
+        `Decimal: ${ultimaUbicacion.formatos.decimal}`,
+        `GMS: ${ultimaUbicacion.formatos.dms}`,
+        `GMD: ${ultimaUbicacion.formatos.ddm}`,
+        `UTM WGS84: ${ultimaUbicacion.formatos.utm}`,
+        `Fuente: ${ultimaUbicacion.fuenteUbicacion || ""}`,
+        `Precisión: ${
+          ultimaUbicacion.accuracy
+            ? "± " + ultimaUbicacion.accuracy.toFixed(1) + " m"
+            : "No disponible"
+        }`,
+        `Altitud: ${
+          ultimaUbicacion.altitude !== null && ultimaUbicacion.altitude !== undefined
+            ? ultimaUbicacion.altitude.toFixed(1) + " m"
+            : "No disponible"
+        }`
+      ].join("\n");
+
+      navigator.clipboard.writeText(texto).then(() => {
+        cambiarEstado("Coordenadas copiadas al portapapeles.", "ok");
+      }).catch(() => {
+        cambiarEstado("No se pudieron copiar las coordenadas.", "error");
+      });
+    }
+
+    function abrirEnMaps() {
+      if (!ultimaUbicacion) {
+        cambiarEstado("Primero activa o captura una coordenada.", "error");
+        return;
+      }
+
+      const url = `https://www.google.com/maps?q=${ultimaUbicacion.lat},${ultimaUbicacion.lon}`;
+      window.open(url, "_blank");
+    }
+
     function obtenerPasoCuadricula(zoom, rangoE, rangoN) {
       const pasos = [5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
 
@@ -1135,129 +1511,9 @@
       }, 80);
     }
 
-    function formatearUbicacion(lat, lon, accuracy, altitude) {
-      const decimal = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
-      const dms = `${convertirDMS(lat, "lat")}, ${convertirDMS(lon, "lon")}`;
-      const ddm = `${convertirDDM(lat, "lat")}, ${convertirDDM(lon, "lon")}`;
-      const utm = latLonAUTM(lat, lon);
-      const utmTexto = `Zona ${utm.zona}${utm.hemisferio}  E ${utm.easting.toFixed(2)}  N ${utm.northing.toFixed(2)}`;
-
-      coordDecimal.textContent = decimal;
-      coordDMS.textContent = dms;
-      coordDDM.textContent = ddm;
-      coordUTM.textContent = utmTexto;
-
-      precisionTexto.textContent = accuracy ? `± ${accuracy.toFixed(1)} m` : "---";
-      altitudTexto.textContent = altitude !== null && altitude !== undefined
-        ? `${altitude.toFixed(1)} m`
-        : "No disponible";
-
-      fuenteUbicacionTexto.textContent = "GPS";
-
-      return {
-        decimal,
-        dms,
-        ddm,
-        utm: utmTexto
-      };
-    }
-
-    function activarUbicacion() {
-      if (!navigator.geolocation) {
-        cambiarEstado("Este navegador no permite obtener coordenadas GPS.", "error");
-        return;
-      }
-
-      cambiarEstado("Solicitando ubicación GPS...", "");
-
-      if (watchUbicacionId !== null) {
-        navigator.geolocation.clearWatch(watchUbicacionId);
-      }
-
-      watchUbicacionId = navigator.geolocation.watchPosition(
-        posicion => {
-          const c = posicion.coords;
-
-          ultimaUbicacion = {
-            lat: c.latitude,
-            lon: c.longitude,
-            accuracy: c.accuracy,
-            altitude: c.altitude,
-            timestamp: posicion.timestamp,
-            formatos: formatearUbicacion(
-              c.latitude,
-              c.longitude,
-              c.accuracy,
-              c.altitude
-            )
-          };
-
-          cambiarEstado(
-            `Coordenadas activas. Precisión aproximada: ± ${c.accuracy.toFixed(1)} m.`,
-            "ok"
-          );
-
-          if (modalMapa.style.display === "flex") {
-            programarRedibujarCuadricula();
-          }
-        },
-        error => {
-          let mensaje = "No se pudo obtener la ubicación.";
-
-          if (error.code === 1) mensaje = "Permiso de ubicación denegado.";
-          if (error.code === 2) mensaje = "Ubicación no disponible.";
-          if (error.code === 3) mensaje = "Tiempo de espera agotado al obtener ubicación.";
-
-          cambiarEstado(mensaje, "error");
-        },
-        {
-          enableHighAccuracy: true,
-          maximumAge: 1000,
-          timeout: 15000
-        }
-      );
-    }
-
-    function copiarCoordenadas() {
-      if (!ultimaUbicacion) {
-        cambiarEstado("Todavía no hay coordenadas para copiar.", "error");
-        return;
-      }
-
-      const texto = [
-        "COORDENADAS",
-        `Decimal: ${ultimaUbicacion.formatos.decimal}`,
-        `GMS: ${ultimaUbicacion.formatos.dms}`,
-        `GMD: ${ultimaUbicacion.formatos.ddm}`,
-        `UTM WGS84: ${ultimaUbicacion.formatos.utm}`,
-        `Precisión: ± ${ultimaUbicacion.accuracy.toFixed(1)} m`,
-        `Altitud: ${
-          ultimaUbicacion.altitude !== null && ultimaUbicacion.altitude !== undefined
-            ? ultimaUbicacion.altitude.toFixed(1) + " m"
-            : "No disponible"
-        }`
-      ].join("\n");
-
-      navigator.clipboard.writeText(texto).then(() => {
-        cambiarEstado("Coordenadas copiadas al portapapeles.", "ok");
-      }).catch(() => {
-        cambiarEstado("No se pudieron copiar las coordenadas.", "error");
-      });
-    }
-
-    function abrirEnMaps() {
-      if (!ultimaUbicacion) {
-        cambiarEstado("Primero activa las coordenadas GPS.", "error");
-        return;
-      }
-
-      const url = `https://www.google.com/maps?q=${ultimaUbicacion.lat},${ultimaUbicacion.lon}`;
-      window.open(url, "_blank");
-    }
-
     function dibujarMapaCuadricula() {
       if (!ultimaUbicacion) {
-        cambiarEstado("Primero activa las coordenadas GPS.", "error");
+        cambiarEstado("Primero activa o captura una coordenada.", "error");
         return;
       }
 
@@ -1351,7 +1607,8 @@
           Decimal: ${lat.toFixed(6)}, ${lon.toFixed(6)}<br>
           UTM WGS84: Zona ${zona}${hemisferio}<br>
           Este: ${utmPunto.easting.toFixed(2)} m<br>
-          Norte: ${utmPunto.northing.toFixed(2)} m
+          Norte: ${utmPunto.northing.toFixed(2)} m<br>
+          Fuente: ${ultimaUbicacion.fuenteUbicacion || ""}
         `);
 
       if (ultimaUbicacion.accuracy) {
@@ -1408,17 +1665,18 @@
         <b>Este:</b> ${utmPunto.easting.toFixed(2)} m ·
         <b>Norte:</b> ${utmPunto.northing.toFixed(2)} m<br>
         <b>Cuadrícula dinámica:</b> intervalo ${paso} m · zoom ${zoom}<br>
-        <b>Precisión GPS:</b> ${
+        <b>Fuente:</b> ${ultimaUbicacion.fuenteUbicacion || ""} ·
+        <b>Precisión:</b> ${
           ultimaUbicacion.accuracy
             ? "± " + ultimaUbicacion.accuracy.toFixed(1) + " m"
-            : "No disponible"
+            : "No disponible / capturada"
         }
       `;
     }
 
     function abrirMapaCuadricula() {
       if (!ultimaUbicacion) {
-        cambiarEstado("Primero toca “Activar coordenadas”.", "error");
+        cambiarEstado("Primero activa o captura una coordenada.", "error");
         return;
       }
 
@@ -1443,6 +1701,7 @@
         rumbo: info.rumbo,
         cuadrante: info.cuadrante,
         fuente: fuente,
+        fuenteUbicacion: ultimaUbicacion ? ultimaUbicacion.fuenteUbicacion : "",
         decimal: ultimaUbicacion ? ultimaUbicacion.formatos.decimal : "",
         dms: ultimaUbicacion ? ultimaUbicacion.formatos.dms : "",
         ddm: ultimaUbicacion ? ultimaUbicacion.formatos.ddm : "",
@@ -1480,6 +1739,7 @@
           <td>${r.dms || ""}</td>
           <td>${r.ddm || ""}</td>
           <td>${r.utm || ""}</td>
+          <td>${r.fuenteUbicacion || ""}</td>
         `;
 
         tabla.appendChild(tr);
@@ -1499,7 +1759,8 @@
         "utm",
         "precision_m",
         "altitud_m",
-        "fuente_brujula"
+        "fuente_brujula",
+        "fuente_ubicacion"
       ];
 
       const filas = [encabezado.join(",")];
@@ -1517,7 +1778,8 @@
           `"${r.utm || ""}"`,
           r.precision || "",
           r.altitud || "",
-          `"${r.fuente || ""}"`
+          `"${r.fuente || ""}"`,
+          `"${r.fuenteUbicacion || ""}"`
         ].join(","));
       });
 
@@ -1554,11 +1816,20 @@
     abrirMapsBtn.addEventListener("click", abrirEnMaps);
     mapaCuadriculaBtn.addEventListener("click", abrirMapaCuadricula);
     cerrarMapaBtn.addEventListener("click", cerrarMapaCuadricula);
+    capturarCoordBtn.addEventListener("click", abrirCapturaCoordenada);
+    cerrarCapturaBtn.addEventListener("click", cerrarCapturaCoordenada);
+    usarCoordManualBtn.addEventListener("click", usarCoordenadaCapturada);
     registrarBtn.addEventListener("click", registrarLectura);
 
     modalMapa.addEventListener("click", e => {
       if (e.target === modalMapa) {
         cerrarMapaCuadricula();
+      }
+    });
+
+    modalCaptura.addEventListener("click", e => {
+      if (e.target === modalCaptura) {
+        cerrarCapturaCoordenada();
       }
     });
 
