@@ -1,1 +1,781 @@
-a
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Brújula Azimut y Rumbo</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #f2f2f2;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #111;
+      display: flex;
+      justify-content: center;
+      padding: 10px;
+    }
+
+    .contenedor {
+      width: 100%;
+      max-width: 980px;
+    }
+
+    .lamina {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 12px 35px rgba(0,0,0,.18);
+      overflow: hidden;
+      border: 1px solid #ccc;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: white;
+    }
+
+    .datos {
+      position: absolute;
+      left: 50%;
+      bottom: 12px;
+      transform: translateX(-50%);
+      width: 94%;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      z-index: 2;
+    }
+
+    .dato {
+      background: rgba(255,255,255,.9);
+      border: 2px solid #111;
+      border-radius: 10px;
+      text-align: center;
+      padding: 8px 5px;
+    }
+
+    .dato span {
+      display: block;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+
+    .dato strong {
+      display: block;
+      font-size: clamp(20px, 5vw, 38px);
+      font-weight: 900;
+      line-height: 1.1;
+    }
+
+    .panel {
+      margin-top: 12px;
+      background: #fff;
+      padding: 12px;
+      border-radius: 14px;
+      box-shadow: 0 8px 20px rgba(0,0,0,.1);
+      border: 1px solid #ddd;
+    }
+
+    .botones {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr 1fr;
+      gap: 8px;
+    }
+
+    button {
+      border: 2px solid #111;
+      background: #fff;
+      color: #111;
+      border-radius: 12px;
+      padding: 12px 8px;
+      font-weight: 900;
+      font-size: 14px;
+      cursor: pointer;
+      box-shadow: 0 3px 0 #111;
+    }
+
+    button:active {
+      transform: translateY(2px);
+      box-shadow: 0 1px 0 #111;
+    }
+
+    .principal {
+      background: #111;
+      color: #fff;
+    }
+
+    .rojo {
+      background: #dc2626;
+      color: #fff;
+    }
+
+    .estado {
+      margin-top: 10px;
+      border: 1px dashed #999;
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 13px;
+      color: #555;
+      line-height: 1.4;
+    }
+
+    .ok {
+      color: #15803d;
+      border-color: #15803d;
+    }
+
+    .error {
+      color: #b91c1c;
+      border-color: #b91c1c;
+    }
+
+    .manual {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #555;
+      font-weight: 800;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: #111;
+    }
+
+    .registros {
+      margin-top: 10px;
+      display: none;
+    }
+
+    .registros.activo {
+      display: block;
+    }
+
+    .herramientas {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      border: 1px solid #111;
+    }
+
+    th {
+      background: #111;
+      color: #fff;
+      padding: 7px;
+      text-align: left;
+    }
+
+    td {
+      padding: 7px;
+      border-bottom: 1px solid #ddd;
+    }
+
+    @media (max-width: 650px) {
+      body {
+        padding: 6px;
+      }
+
+      .botones,
+      .herramientas {
+        grid-template-columns: 1fr;
+      }
+
+      .dato {
+        padding: 6px 3px;
+      }
+
+      .dato span {
+        font-size: 9px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="contenedor">
+
+    <section class="lamina">
+      <canvas id="canvas"></canvas>
+
+      <div class="datos">
+        <div class="dato">
+          <span>Azimut</span>
+          <strong id="azimutTexto">0°</strong>
+        </div>
+
+        <div class="dato">
+          <span>Rumbo</span>
+          <strong id="rumboTexto">N</strong>
+        </div>
+
+        <div class="dato">
+          <span>Cuadrante</span>
+          <strong id="cuadranteTexto">N</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="botones">
+        <button class="principal" id="activarBtn">Activar brújula</button>
+        <button id="registrarBtn">Registrar lectura</button>
+        <button id="verBtn">Ver registros</button>
+      </div>
+
+      <div class="estado" id="estado">
+        Toca “Activar brújula”. Apunta la parte superior del teléfono hacia el objetivo.
+        La aguja roja marcará el azimut sobre la imagen.
+      </div>
+
+      <div class="manual">
+        Prueba manual si el teléfono no detecta la brújula:
+        <input type="range" min="0" max="359" value="0" id="manual">
+      </div>
+
+      <div class="registros" id="registros">
+        <div class="herramientas">
+          <button id="descargarBtn">Descargar CSV</button>
+          <button id="calibrarBtn">Calibrar actual a 0°</button>
+          <button class="rojo" id="borrarBtn">Borrar registros</button>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Hora</th>
+              <th>Azimut</th>
+              <th>Rumbo</th>
+              <th>Cuadrante</th>
+            </tr>
+          </thead>
+          <tbody id="tabla"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    const azimutTexto = document.getElementById("azimutTexto");
+    const rumboTexto = document.getElementById("rumboTexto");
+    const cuadranteTexto = document.getElementById("cuadranteTexto");
+
+    const activarBtn = document.getElementById("activarBtn");
+    const registrarBtn = document.getElementById("registrarBtn");
+    const verBtn = document.getElementById("verBtn");
+    const descargarBtn = document.getElementById("descargarBtn");
+    const borrarBtn = document.getElementById("borrarBtn");
+    const calibrarBtn = document.getElementById("calibrarBtn");
+
+    const estado = document.getElementById("estado");
+    const manual = document.getElementById("manual");
+    const registrosDiv = document.getElementById("registros");
+    const tabla = document.getElementById("tabla");
+
+    let azimut = 0;
+    let azimutObjetivo = 0;
+    let sensorActivo = false;
+    let fuente = "manual";
+
+    let calibracion = Number(localStorage.getItem("calibracionAzimut") || 0);
+    let registros = JSON.parse(localStorage.getItem("registrosAzimut") || "[]");
+
+    function normalizar(grados) {
+      return ((grados % 360) + 360) % 360;
+    }
+
+    function redondear(grados) {
+      return Math.round(normalizar(grados));
+    }
+
+    function polar(cx, cy, r, grados) {
+      const rad = (grados - 90) * Math.PI / 180;
+      return [
+        cx + Math.cos(rad) * r,
+        cy + Math.sin(rad) * r
+      ];
+    }
+
+    function diferenciaCorta(actual, objetivo) {
+      return ((objetivo - actual + 540) % 360) - 180;
+    }
+
+    function obtenerRumbo(grados) {
+      const a = redondear(grados);
+
+      if (a === 0 || a === 360) {
+        return { rumbo: "N", cuadrante: "N" };
+      }
+
+      if (a === 90) {
+        return { rumbo: "E", cuadrante: "E" };
+      }
+
+      if (a === 180) {
+        return { rumbo: "S", cuadrante: "S" };
+      }
+
+      if (a === 270) {
+        return { rumbo: "O", cuadrante: "O" };
+      }
+
+      if (a > 0 && a < 90) {
+        return {
+          rumbo: `N ${a}° E`,
+          cuadrante: "NE"
+        };
+      }
+
+      if (a > 90 && a < 180) {
+        return {
+          rumbo: `S ${180 - a}° E`,
+          cuadrante: "SE"
+        };
+      }
+
+      if (a > 180 && a < 270) {
+        return {
+          rumbo: `S ${a - 180}° O`,
+          cuadrante: "SO"
+        };
+      }
+
+      return {
+        rumbo: `N ${360 - a}° O`,
+        cuadrante: "NO"
+      };
+    }
+
+    function cambiarEstado(texto, tipo = "") {
+      estado.className = "estado " + tipo;
+      estado.textContent = texto;
+    }
+
+    function ajustarCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      dibujar();
+    }
+
+    function texto(texto, x, y, tam, peso = 700, fuenteTexto = "Arial", rotacion = 0) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rotacion);
+      ctx.font = `${peso} ${tam}px ${fuenteTexto}`;
+      ctx.fillStyle = "#050505";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(texto, 0, 0);
+      ctx.restore();
+    }
+
+    function textoConBorde(textoValor, x, y, tam) {
+      ctx.save();
+      ctx.font = `900 ${tam}px Arial`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineWidth = Math.max(2, tam * 0.08);
+      ctx.strokeStyle = "white";
+      ctx.strokeText(textoValor, x, y);
+      ctx.fillStyle = "#050505";
+      ctx.fillText(textoValor, x, y);
+      ctx.restore();
+    }
+
+    function numeroCircular(valor, cx, cy, r, grados, tam, peso = 700) {
+      const [x, y] = polar(cx, cy, r, grados);
+      const rot = (grados) * Math.PI / 180;
+      texto(valor, x, y, tam, peso, "Arial", rot);
+    }
+
+    function circuloPunteado(cx, cy, r) {
+      ctx.save();
+      ctx.strokeStyle = "#111";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([2, 5]);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function dibujar() {
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "white";
+      ctx.fillRect(0, 0, w, h);
+
+      const cx = w / 2;
+      const cy = h / 2;
+      const r = Math.min(w, h) * 0.405;
+      const rInterno = r * 0.84;
+
+      textoConBorde("Azimut", w * 0.12, h * 0.08, Math.max(34, w * 0.06));
+
+      ctx.strokeStyle = "#050505";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+
+      for (let g = 0; g < 360; g++) {
+        const mayor = g % 10 === 0;
+        const medio = g % 5 === 0;
+
+        const largo = mayor ? r * 0.065 : medio ? r * 0.045 : r * 0.026;
+        const grosor = mayor ? 3 : medio ? 2 : 1;
+
+        const [x1, y1] = polar(cx, cy, r, g);
+        const [x2, y2] = polar(cx, cy, r - largo, g);
+
+        ctx.lineWidth = grosor;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+
+      circuloPunteado(cx, cy, rInterno);
+
+      const tamNum = Math.max(14, w * 0.026);
+
+      for (let g = 10; g < 360; g += 10) {
+        numeroCircular(String(g), cx, cy, r - r * 0.078, g, tamNum, 800);
+      }
+
+      numeroCircular("360", cx, cy, r - r * 0.078, 0, tamNum, 800);
+      numeroCircular("0", cx, cy, r - r * 0.14, 0, tamNum * 0.9, 700);
+
+      const tamCardinal = Math.max(28, w * 0.055);
+
+      texto("N", cx, cy - r - r * 0.09, tamCardinal, 900, "Georgia");
+      texto("E", cx + r + r * 0.09, cy, tamCardinal, 900, "Georgia");
+      texto("S", cx, cy + r + r * 0.09, tamCardinal, 900, "Georgia");
+      texto("O", cx - r - r * 0.09, cy, tamCardinal, 900, "Georgia");
+
+      const rNumsInternos = rInterno - r * 0.11;
+      const tamInterno = Math.max(11, w * 0.018);
+
+      for (let v = 10; v <= 80; v += 10) {
+        numeroCircular(String(v), cx, cy, rNumsInternos, v, tamInterno, 500);
+        numeroCircular(String(v), cx, cy, rNumsInternos, 180 - v, tamInterno, 500);
+        numeroCircular(String(v), cx, cy, rNumsInternos, 180 + v, tamInterno, 500);
+        numeroCircular(String(v), cx, cy, rNumsInternos, 360 - v, tamInterno, 500);
+      }
+
+      ctx.save();
+      ctx.strokeStyle = "#050505";
+      ctx.lineWidth = Math.max(2, w * 0.003);
+      ctx.lineCap = "round";
+
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - rInterno * 0.98);
+      ctx.lineTo(cx, cy + rInterno * 0.98);
+      ctx.moveTo(cx - rInterno * 0.98, cy);
+      ctx.lineTo(cx + rInterno * 0.98, cy);
+      ctx.stroke();
+      ctx.restore();
+
+      const puntos = [
+        [0, -rInterno * 0.88],
+        [0, rInterno * 0.88],
+        [rInterno * 0.88, 0]
+      ];
+
+      puntos.forEach(p => {
+        ctx.beginPath();
+        ctx.fillStyle = "#050505";
+        ctx.arc(cx + p[0], cy + p[1], Math.max(4, w * 0.007), 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      const tamCuadrante = Math.max(36, w * 0.067);
+
+      textoConBorde("NO", cx - rInterno * 0.33, cy - rInterno * 0.33, tamCuadrante);
+      textoConBorde("NE", cx + rInterno * 0.33, cy - rInterno * 0.33, tamCuadrante);
+      textoConBorde("SO", cx - rInterno * 0.33, cy + rInterno * 0.33, tamCuadrante);
+      textoConBorde("SE", cx + rInterno * 0.33, cy + rInterno * 0.33, tamCuadrante);
+
+      ctx.save();
+      ctx.fillStyle = "rgba(255,255,255,.94)";
+      ctx.fillRect(cx - r * 0.27, cy - r * 0.075, r * 0.54, r * 0.15);
+      textoConBorde("Rumbo", cx, cy, Math.max(34, w * 0.06));
+      ctx.restore();
+
+      dibujarAguja(cx, cy, rInterno);
+    }
+
+    function dibujarAguja(cx, cy, r) {
+      const grados = azimut;
+
+      const [puntaX, puntaY] = polar(cx, cy, r * 0.93, grados);
+      const [colaX, colaY] = polar(cx, cy, r * 0.20, grados + 180);
+
+      ctx.save();
+      ctx.strokeStyle = "#dc2626";
+      ctx.lineWidth = Math.max(5, canvas.clientWidth * 0.007);
+      ctx.lineCap = "round";
+
+      ctx.beginPath();
+      ctx.moveTo(colaX, colaY);
+      ctx.lineTo(puntaX, puntaY);
+      ctx.stroke();
+
+      const rad = (grados - 90) * Math.PI / 180;
+
+      ctx.translate(puntaX, puntaY);
+      ctx.rotate(rad + Math.PI / 2);
+
+      const flecha = Math.max(12, canvas.clientWidth * 0.018);
+
+      ctx.fillStyle = "#dc2626";
+      ctx.beginPath();
+      ctx.moveTo(0, -flecha * 1.8);
+      ctx.lineTo(-flecha, flecha);
+      ctx.lineTo(flecha, flecha);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+
+      ctx.beginPath();
+      ctx.fillStyle = "#050505";
+      ctx.arc(cx, cy, Math.max(7, canvas.clientWidth * 0.01), 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.fillStyle = "#fff";
+      ctx.arc(cx, cy, Math.max(3, canvas.clientWidth * 0.0045), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function actualizarDatos() {
+      const a = redondear(azimut);
+      const info = obtenerRumbo(a);
+
+      azimutTexto.textContent = `${a}°`;
+      rumboTexto.textContent = info.rumbo;
+      cuadranteTexto.textContent = info.cuadrante;
+      manual.value = String(a);
+    }
+
+    function fijarAzimut(valor, origen = "manual") {
+      azimutObjetivo = normalizar(valor + calibracion);
+      fuente = origen;
+      sensorActivo = origen !== "manual";
+    }
+
+    function leerOrientacion(evento) {
+      let valor = null;
+      let origen = "";
+
+      if (
+        typeof evento.webkitCompassHeading === "number" &&
+        !Number.isNaN(evento.webkitCompassHeading)
+      ) {
+        valor = evento.webkitCompassHeading;
+        origen = "sensor iPhone";
+      } else if (
+        typeof evento.alpha === "number" &&
+        !Number.isNaN(evento.alpha)
+      ) {
+        valor = 360 - evento.alpha;
+        origen = evento.absolute ? "sensor absoluto" : "sensor relativo";
+      }
+
+      if (valor === null) return;
+
+      fijarAzimut(valor, origen);
+      cambiarEstado(
+        "Brújula activa. Mueve el teléfono en forma de 8 para calibrar mejor. Fuente: " + origen,
+        "ok"
+      );
+    }
+
+    async function activarBrujula() {
+      if (!("DeviceOrientationEvent" in window)) {
+        cambiarEstado(
+          "Este navegador no permite leer la orientación del teléfono. Usa el modo manual.",
+          "error"
+        );
+        return;
+      }
+
+      try {
+        if (typeof DeviceOrientationEvent.requestPermission === "function") {
+          const permiso = await DeviceOrientationEvent.requestPermission();
+
+          if (permiso !== "granted") {
+            cambiarEstado(
+              "Permiso denegado. Activa movimiento y orientación en el navegador.",
+              "error"
+            );
+            return;
+          }
+        }
+
+        window.addEventListener("deviceorientationabsolute", leerOrientacion, true);
+        window.addEventListener("deviceorientation", leerOrientacion, true);
+
+        cambiarEstado(
+          "Brújula activada. Apunta la parte superior del teléfono hacia el objetivo.",
+          "ok"
+        );
+      } catch (error) {
+        cambiarEstado("No se pudo activar la brújula: " + error.message, "error");
+      }
+    }
+
+    function registrarLectura() {
+      const a = redondear(azimut);
+      const info = obtenerRumbo(a);
+
+      const fila = {
+        hora: new Date().toLocaleString("es-MX"),
+        azimut: a,
+        rumbo: info.rumbo,
+        cuadrante: info.cuadrante,
+        fuente: fuente
+      };
+
+      registros.push(fila);
+      localStorage.setItem("registrosAzimut", JSON.stringify(registros));
+
+      pintarRegistros();
+
+      cambiarEstado(
+        `Lectura registrada: ${a}° · ${info.rumbo} · ${info.cuadrante}`,
+        "ok"
+      );
+    }
+
+    function pintarRegistros() {
+      tabla.innerHTML = "";
+
+      registros.slice().reverse().forEach((r, i) => {
+        const numero = registros.length - i;
+
+        const tr = document.createElement("tr");
+
+        tr.innerHTML = `
+          <td>${numero}</td>
+          <td>${r.hora}</td>
+          <td>${r.azimut}°</td>
+          <td>${r.rumbo}</td>
+          <td>${r.cuadrante}</td>
+        `;
+
+        tabla.appendChild(tr);
+      });
+    }
+
+    function descargarCSV() {
+      const encabezado = ["numero", "hora", "azimut", "rumbo", "cuadrante", "fuente"];
+      const filas = [encabezado.join(",")];
+
+      registros.forEach((r, i) => {
+        filas.push([
+          i + 1,
+          `"${r.hora}"`,
+          r.azimut,
+          `"${r.rumbo}"`,
+          r.cuadrante,
+          `"${r.fuente}"`
+        ].join(","));
+      });
+
+      const blob = new Blob([filas.join("\n")], {
+        type: "text/csv;charset=utf-8"
+      });
+
+      const url = URL.createObjectURL(blob);
+      const enlace = document.createElement("a");
+
+      enlace.href = url;
+      enlace.download = "registros_brujula_azimut_rumbo.csv";
+      document.body.appendChild(enlace);
+      enlace.click();
+      enlace.remove();
+
+      URL.revokeObjectURL(url);
+    }
+
+    function animar() {
+      azimut = normalizar(
+        azimut + diferenciaCorta(azimut, azimutObjetivo) * 0.18
+      );
+
+      dibujar();
+      actualizarDatos();
+
+      requestAnimationFrame(animar);
+    }
+
+    activarBtn.addEventListener("click", activarBrujula);
+
+    registrarBtn.addEventListener("click", registrarLectura);
+
+    verBtn.addEventListener("click", () => {
+      registrosDiv.classList.toggle("activo");
+      verBtn.textContent = registrosDiv.classList.contains("activo")
+        ? "Ocultar registros"
+        : "Ver registros";
+    });
+
+    descargarBtn.addEventListener("click", descargarCSV);
+
+    borrarBtn.addEventListener("click", () => {
+      registros = [];
+      localStorage.removeItem("registrosAzimut");
+      pintarRegistros();
+      cambiarEstado("Registros borrados.", "ok");
+    });
+
+    calibrarBtn.addEventListener("click", () => {
+      calibracion = normalizar(-azimut);
+      localStorage.setItem("calibracionAzimut", String(calibracion));
+      cambiarEstado("Calibración aplicada. La dirección actual se tomó como 0°.", "ok");
+    });
+
+    manual.addEventListener("input", e => {
+      if (!sensorActivo) {
+        fijarAzimut(Number(e.target.value), "manual");
+      }
+    });
+
+    window.addEventListener("resize", ajustarCanvas);
+
+    pintarRegistros();
+    ajustarCanvas();
+    requestAnimationFrame(animar);
+  </script>
+</body>
+</html>
