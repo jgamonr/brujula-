@@ -3,7 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Brújula Azimut, Rumbo y Coordenadas</title>
+  <title>Brújula Azimut, Rumbo, Coordenadas y Mapa UTM</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
     * {
@@ -181,7 +188,7 @@
 
     .coord-actions {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(3, 1fr);
       gap: 8px;
       margin-bottom: 10px;
     }
@@ -289,6 +296,71 @@
       vertical-align: top;
     }
 
+    .mapa-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.75);
+      z-index: 9999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+    }
+
+    .mapa-contenedor {
+      width: 100%;
+      max-width: 980px;
+      height: 92vh;
+      background: #fff;
+      border-radius: 16px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      border: 3px solid #111;
+    }
+
+    .mapa-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      border-bottom: 2px solid #111;
+      background: #fff;
+    }
+
+    .mapa-header h2 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 900;
+    }
+
+    #mapa {
+      flex: 1;
+      width: 100%;
+      min-height: 400px;
+    }
+
+    .datos-mapa {
+      padding: 10px;
+      font-size: 13px;
+      background: #111;
+      color: #fff;
+      line-height: 1.4;
+      font-family: Consolas, monospace;
+    }
+
+    .grid-label {
+      background: rgba(255,255,255,.92);
+      border: 1px solid #111;
+      border-radius: 4px;
+      padding: 2px 4px;
+      font-size: 10px;
+      font-weight: 900;
+      color: #111;
+      white-space: nowrap;
+    }
+
     @media (max-width: 650px) {
       body {
         padding: 6px;
@@ -312,6 +384,14 @@
       .coord-header {
         flex-direction: column;
         align-items: stretch;
+      }
+
+      .mapa-contenedor {
+        height: 94vh;
+      }
+
+      .mapa-header h2 {
+        font-size: 15px;
       }
     }
   </style>
@@ -365,6 +445,7 @@
 
         <div class="coord-actions">
           <button id="abrirMapsBtn">Abrir en Google Maps</button>
+          <button id="mapaCuadriculaBtn">Mapa con cuadrícula</button>
           <button id="verBtn">Ver registros</button>
         </div>
 
@@ -380,7 +461,7 @@
           </div>
 
           <div class="coord-item">
-            <span>Grados y minutos decimales</span>
+            <span>Grados y minutos decimales / GMD</span>
             <strong id="coordDDM">Sin ubicación</strong>
           </div>
 
@@ -436,6 +517,21 @@
       </div>
     </section>
 
+    <div class="mapa-modal" id="modalMapa">
+      <div class="mapa-contenedor">
+        <div class="mapa-header">
+          <h2>Mapa con cuadrícula UTM</h2>
+          <button id="cerrarMapaBtn">Cerrar</button>
+        </div>
+
+        <div id="mapa"></div>
+
+        <div class="datos-mapa" id="datosMapa">
+          Activa las coordenadas GPS para mostrar el mapa.
+        </div>
+      </div>
+    </div>
+
   </main>
 
   <script>
@@ -464,6 +560,10 @@
     const calibrarBtn = document.getElementById("calibrarBtn");
     const copiarCoordsBtn = document.getElementById("copiarCoordsBtn");
     const abrirMapsBtn = document.getElementById("abrirMapsBtn");
+    const mapaCuadriculaBtn = document.getElementById("mapaCuadriculaBtn");
+    const modalMapa = document.getElementById("modalMapa");
+    const cerrarMapaBtn = document.getElementById("cerrarMapaBtn");
+    const datosMapa = document.getElementById("datosMapa");
 
     const estado = document.getElementById("estado");
     const manual = document.getElementById("manual");
@@ -480,6 +580,9 @@
 
     let ultimaUbicacion = null;
     let watchUbicacionId = null;
+
+    let mapaLeaflet = null;
+    let capaCuadricula = null;
 
     function normalizar(grados) {
       return ((grados % 360) + 360) % 360;
@@ -540,7 +643,7 @@
       dibujar();
     }
 
-    function texto(texto, x, y, tam, peso = 700, fuenteTexto = "Arial", rotacion = 0) {
+    function texto(textoValor, x, y, tam, peso = 700, fuenteTexto = "Arial", rotacion = 0) {
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(rotacion);
@@ -548,7 +651,7 @@
       ctx.fillStyle = "#050505";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(texto, 0, 0);
+      ctx.fillText(textoValor, 0, 0);
       ctx.restore();
     }
 
@@ -893,6 +996,66 @@
       };
     }
 
+    function utmALatLon(easting, northing, zona, hemisferio) {
+      const a = 6378137.0;
+      const f = 1 / 298.257223563;
+      const k0 = 0.9996;
+
+      const e = Math.sqrt(f * (2 - f));
+      const e2 = e * e;
+      const ep2 = e2 / (1 - e2);
+
+      let x = easting - 500000.0;
+      let y = northing;
+
+      if (hemisferio === "S") {
+        y -= 10000000.0;
+      }
+
+      const lonOrigen = (zona - 1) * 6 - 180 + 3;
+
+      const M = y / k0;
+      const mu = M / (
+        a * (1 - e2 / 4 - 3 * Math.pow(e2, 2) / 64 - 5 * Math.pow(e2, 3) / 256)
+      );
+
+      const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+
+      const phi1 =
+        mu
+        + (3 * e1 / 2 - 27 * Math.pow(e1, 3) / 32) * Math.sin(2 * mu)
+        + (21 * Math.pow(e1, 2) / 16 - 55 * Math.pow(e1, 4) / 32) * Math.sin(4 * mu)
+        + (151 * Math.pow(e1, 3) / 96) * Math.sin(6 * mu)
+        + (1097 * Math.pow(e1, 4) / 512) * Math.sin(8 * mu);
+
+      const N1 = a / Math.sqrt(1 - e2 * Math.pow(Math.sin(phi1), 2));
+      const T1 = Math.pow(Math.tan(phi1), 2);
+      const C1 = ep2 * Math.pow(Math.cos(phi1), 2);
+      const R1 = a * (1 - e2) / Math.pow(1 - e2 * Math.pow(Math.sin(phi1), 2), 1.5);
+      const D = x / (N1 * k0);
+
+      const latRad =
+        phi1
+        - (N1 * Math.tan(phi1) / R1)
+        * (
+          Math.pow(D, 2) / 2
+          - (5 + 3 * T1 + 10 * C1 - 4 * Math.pow(C1, 2) - 9 * ep2) * Math.pow(D, 4) / 24
+          + (61 + 90 * T1 + 298 * C1 + 45 * Math.pow(T1, 2) - 252 * ep2 - 3 * Math.pow(C1, 2)) * Math.pow(D, 6) / 720
+        );
+
+      const lonRad =
+        (
+          D
+          - (1 + 2 * T1 + C1) * Math.pow(D, 3) / 6
+          + (5 - 2 * C1 + 28 * T1 - 3 * Math.pow(C1, 2) + 8 * ep2 + 24 * Math.pow(T1, 2)) * Math.pow(D, 5) / 120
+        ) / Math.cos(phi1);
+
+      return {
+        lat: latRad * 180 / Math.PI,
+        lon: lonOrigen + lonRad * 180 / Math.PI
+      };
+    }
+
     function formatearUbicacion(lat, lon, accuracy, altitude) {
       const decimal = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
       const dms = `${convertirDMS(lat, "lat")}, ${convertirDMS(lon, "lon")}`;
@@ -954,6 +1117,10 @@
             `Coordenadas activas. Precisión aproximada: ± ${c.accuracy.toFixed(1)} m.`,
             "ok"
           );
+
+          if (modalMapa.style.display === "flex") {
+            dibujarMapaCuadricula();
+          }
         },
         error => {
           let mensaje = "No se pudo obtener la ubicación.";
@@ -1007,6 +1174,169 @@
 
       const url = `https://www.google.com/maps?q=${ultimaUbicacion.lat},${ultimaUbicacion.lon}`;
       window.open(url, "_blank");
+    }
+
+    function crearEtiquetaCuadricula(texto, lat, lon) {
+      return L.marker([lat, lon], {
+        interactive: false,
+        icon: L.divIcon({
+          className: "grid-label",
+          html: texto,
+          iconSize: [90, 18],
+          iconAnchor: [45, 9]
+        })
+      });
+    }
+
+    function dibujarMapaCuadricula() {
+      if (!ultimaUbicacion) {
+        cambiarEstado("Primero activa las coordenadas GPS.", "error");
+        return;
+      }
+
+      if (typeof L === "undefined") {
+        cambiarEstado("No se pudo cargar el mapa. Revisa tu conexión a internet.", "error");
+        return;
+      }
+
+      const lat = ultimaUbicacion.lat;
+      const lon = ultimaUbicacion.lon;
+      const utm = latLonAUTM(lat, lon);
+
+      if (!mapaLeaflet) {
+        mapaLeaflet = L.map("mapa", {
+          zoomControl: true
+        }).setView([lat, lon], 17);
+
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 20,
+          attribution: "© OpenStreetMap"
+        }).addTo(mapaLeaflet);
+      }
+
+      if (capaCuadricula) {
+        capaCuadricula.remove();
+      }
+
+      capaCuadricula = L.layerGroup().addTo(mapaLeaflet);
+
+      L.marker([lat, lon])
+        .addTo(capaCuadricula)
+        .bindPopup(`
+          <b>Ubicación marcada</b><br>
+          Decimal: ${lat.toFixed(6)}, ${lon.toFixed(6)}<br>
+          UTM WGS84: Zona ${utm.zona}${utm.hemisferio}<br>
+          Este: ${utm.easting.toFixed(2)} m<br>
+          Norte: ${utm.northing.toFixed(2)} m
+        `)
+        .openPopup();
+
+      if (ultimaUbicacion.accuracy) {
+        L.circle([lat, lon], {
+          radius: ultimaUbicacion.accuracy,
+          color: "#dc2626",
+          weight: 2,
+          fillColor: "#dc2626",
+          fillOpacity: 0.12
+        }).addTo(capaCuadricula);
+      }
+
+      const paso = 100;
+      const radio = 500;
+
+      const eCentro = Math.round(utm.easting / paso) * paso;
+      const nCentro = Math.round(utm.northing / paso) * paso;
+
+      const limites = [];
+
+      for (let e = eCentro - radio; e <= eCentro + radio; e += paso) {
+        const p1 = utmALatLon(e, nCentro - radio, utm.zona, utm.hemisferio);
+        const p2 = utmALatLon(e, nCentro + radio, utm.zona, utm.hemisferio);
+
+        const esLineaCentro = e === eCentro;
+
+        L.polyline(
+          [
+            [p1.lat, p1.lon],
+            [p2.lat, p2.lon]
+          ],
+          {
+            color: esLineaCentro ? "#dc2626" : "#111",
+            weight: esLineaCentro ? 3 : 1,
+            opacity: esLineaCentro ? 0.95 : 0.55
+          }
+        ).addTo(capaCuadricula);
+
+        if (e % 200 === 0) {
+          crearEtiquetaCuadricula(`E ${Math.round(e)}`, p2.lat, p2.lon)
+            .addTo(capaCuadricula);
+        }
+
+        limites.push([p1.lat, p1.lon], [p2.lat, p2.lon]);
+      }
+
+      for (let n = nCentro - radio; n <= nCentro + radio; n += paso) {
+        const p1 = utmALatLon(eCentro - radio, n, utm.zona, utm.hemisferio);
+        const p2 = utmALatLon(eCentro + radio, n, utm.zona, utm.hemisferio);
+
+        const esLineaCentro = n === nCentro;
+
+        L.polyline(
+          [
+            [p1.lat, p1.lon],
+            [p2.lat, p2.lon]
+          ],
+          {
+            color: esLineaCentro ? "#dc2626" : "#111",
+            weight: esLineaCentro ? 3 : 1,
+            opacity: esLineaCentro ? 0.95 : 0.55
+          }
+        ).addTo(capaCuadricula);
+
+        if (n % 200 === 0) {
+          crearEtiquetaCuadricula(`N ${Math.round(n)}`, p2.lat, p2.lon)
+            .addTo(capaCuadricula);
+        }
+
+        limites.push([p1.lat, p1.lon], [p2.lat, p2.lon]);
+      }
+
+      datosMapa.innerHTML = `
+        <b>Coordenada marcada:</b> ${lat.toFixed(6)}, ${lon.toFixed(6)}<br>
+        <b>Cuadrícula:</b> UTM WGS84 · Zona ${utm.zona}${utm.hemisferio} · cada 100 m<br>
+        <b>Este:</b> ${utm.easting.toFixed(2)} m ·
+        <b>Norte:</b> ${utm.northing.toFixed(2)} m ·
+        <b>Precisión GPS:</b> ${
+          ultimaUbicacion.accuracy
+            ? "± " + ultimaUbicacion.accuracy.toFixed(1) + " m"
+            : "No disponible"
+        }
+      `;
+
+      mapaLeaflet.fitBounds(limites, {
+        padding: [25, 25]
+      });
+
+      setTimeout(() => {
+        mapaLeaflet.invalidateSize();
+      }, 250);
+    }
+
+    function abrirMapaCuadricula() {
+      if (!ultimaUbicacion) {
+        cambiarEstado("Primero toca “Activar coordenadas”.", "error");
+        return;
+      }
+
+      modalMapa.style.display = "flex";
+
+      setTimeout(() => {
+        dibujarMapaCuadricula();
+      }, 150);
+    }
+
+    function cerrarMapaCuadricula() {
+      modalMapa.style.display = "none";
     }
 
     function registrarLectura() {
@@ -1128,7 +1458,15 @@
     ubicacionBtn.addEventListener("click", activarUbicacion);
     copiarCoordsBtn.addEventListener("click", copiarCoordenadas);
     abrirMapsBtn.addEventListener("click", abrirEnMaps);
+    mapaCuadriculaBtn.addEventListener("click", abrirMapaCuadricula);
+    cerrarMapaBtn.addEventListener("click", cerrarMapaCuadricula);
     registrarBtn.addEventListener("click", registrarLectura);
+
+    modalMapa.addEventListener("click", e => {
+      if (e.target === modalMapa) {
+        cerrarMapaCuadricula();
+      }
+    });
 
     verBtn.addEventListener("click", () => {
       registrosDiv.classList.toggle("activo");
