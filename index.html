@@ -122,13 +122,13 @@
       color: #fff;
     }
 
-    .rojo {
-      background: #dc2626;
+    .verde {
+      background: #15803d;
       color: #fff;
     }
 
-    .verde {
-      background: #15803d;
+    .rojo {
+      background: #dc2626;
       color: #fff;
     }
 
@@ -520,7 +520,7 @@
     <div class="mapa-modal" id="modalMapa">
       <div class="mapa-contenedor">
         <div class="mapa-header">
-          <h2>Mapa con cuadrícula UTM</h2>
+          <h2>Mapa con cuadrícula UTM dinámica</h2>
           <button id="cerrarMapaBtn">Cerrar</button>
         </div>
 
@@ -583,6 +583,7 @@
 
     let mapaLeaflet = null;
     let capaCuadricula = null;
+    let temporizadorCuadricula = null;
 
     function normalizar(grados) {
       return ((grados % 360) + 360) % 360;
@@ -941,6 +942,11 @@
     }
 
     function latLonAUTM(lat, lon) {
+      const zona = Math.floor((lon + 180) / 6) + 1;
+      return latLonAUTMEnZona(lat, lon, zona);
+    }
+
+    function latLonAUTMEnZona(lat, lon, zonaForzada) {
       const a = 6378137.0;
       const f = 1 / 298.257223563;
       const k0 = 0.9996;
@@ -949,7 +955,7 @@
       const e2 = e * e;
       const ep2 = e2 / (1 - e2);
 
-      const zona = Math.floor((lon + 180) / 6) + 1;
+      const zona = zonaForzada || Math.floor((lon + 180) / 6) + 1;
       const lonOrigen = (zona - 1) * 6 - 180 + 3;
 
       const latRad = lat * Math.PI / 180;
@@ -1056,6 +1062,79 @@
       };
     }
 
+    function obtenerPasoCuadricula(zoom, rangoE, rangoN) {
+      const pasos = [5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
+
+      let paso;
+
+      if (zoom >= 20) paso = 5;
+      else if (zoom >= 19) paso = 10;
+      else if (zoom >= 18) paso = 20;
+      else if (zoom >= 17) paso = 50;
+      else if (zoom >= 15) paso = 100;
+      else if (zoom >= 14) paso = 200;
+      else if (zoom >= 13) paso = 500;
+      else if (zoom >= 11) paso = 1000;
+      else if (zoom >= 9) paso = 2000;
+      else paso = 5000;
+
+      let indice = pasos.indexOf(paso);
+      const rangoMayor = Math.max(rangoE, rangoN);
+
+      while (rangoMayor / paso > 24 && indice < pasos.length - 1) {
+        indice++;
+        paso = pasos[indice];
+      }
+
+      return paso;
+    }
+
+    function crearLineaUTMVertical(easting, nMin, nMax, zona, hemisferio) {
+      const puntos = [];
+      const segmentos = 22;
+
+      for (let i = 0; i <= segmentos; i++) {
+        const n = nMin + ((nMax - nMin) * i / segmentos);
+        const p = utmALatLon(easting, n, zona, hemisferio);
+        puntos.push([p.lat, p.lon]);
+      }
+
+      return puntos;
+    }
+
+    function crearLineaUTMHorizontal(northing, eMin, eMax, zona, hemisferio) {
+      const puntos = [];
+      const segmentos = 22;
+
+      for (let i = 0; i <= segmentos; i++) {
+        const e = eMin + ((eMax - eMin) * i / segmentos);
+        const p = utmALatLon(e, northing, zona, hemisferio);
+        puntos.push([p.lat, p.lon]);
+      }
+
+      return puntos;
+    }
+
+    function crearEtiquetaCuadricula(texto, lat, lon) {
+      return L.marker([lat, lon], {
+        interactive: false,
+        icon: L.divIcon({
+          className: "grid-label",
+          html: texto,
+          iconSize: [100, 18],
+          iconAnchor: [50, 9]
+        })
+      });
+    }
+
+    function programarRedibujarCuadricula() {
+      clearTimeout(temporizadorCuadricula);
+
+      temporizadorCuadricula = setTimeout(() => {
+        redibujarCuadriculaDinamica();
+      }, 80);
+    }
+
     function formatearUbicacion(lat, lon, accuracy, altitude) {
       const decimal = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
       const dms = `${convertirDMS(lat, "lat")}, ${convertirDMS(lon, "lon")}`;
@@ -1119,7 +1198,7 @@
           );
 
           if (modalMapa.style.display === "flex") {
-            dibujarMapaCuadricula();
+            programarRedibujarCuadricula();
           }
         },
         error => {
@@ -1176,18 +1255,6 @@
       window.open(url, "_blank");
     }
 
-    function crearEtiquetaCuadricula(texto, lat, lon) {
-      return L.marker([lat, lon], {
-        interactive: false,
-        icon: L.divIcon({
-          className: "grid-label",
-          html: texto,
-          iconSize: [90, 18],
-          iconAnchor: [45, 9]
-        })
-      });
-    }
-
     function dibujarMapaCuadricula() {
       if (!ultimaUbicacion) {
         cambiarEstado("Primero activa las coordenadas GPS.", "error");
@@ -1201,7 +1268,6 @@
 
       const lat = ultimaUbicacion.lat;
       const lon = ultimaUbicacion.lon;
-      const utm = latLonAUTM(lat, lon);
 
       if (!mapaLeaflet) {
         mapaLeaflet = L.map("mapa", {
@@ -1212,7 +1278,28 @@
           maxZoom: 20,
           attribution: "© OpenStreetMap"
         }).addTo(mapaLeaflet);
+
+        mapaLeaflet.on("zoomend", programarRedibujarCuadricula);
+        mapaLeaflet.on("moveend", programarRedibujarCuadricula);
+      } else {
+        mapaLeaflet.setView([lat, lon], mapaLeaflet.getZoom());
       }
+
+      setTimeout(() => {
+        mapaLeaflet.invalidateSize();
+        redibujarCuadriculaDinamica();
+      }, 200);
+    }
+
+    function redibujarCuadriculaDinamica() {
+      if (!ultimaUbicacion || !mapaLeaflet) return;
+
+      const lat = ultimaUbicacion.lat;
+      const lon = ultimaUbicacion.lon;
+
+      const utmPunto = latLonAUTM(lat, lon);
+      const zona = utmPunto.zona;
+      const hemisferio = utmPunto.hemisferio;
 
       if (capaCuadricula) {
         capaCuadricula.remove();
@@ -1220,16 +1307,52 @@
 
       capaCuadricula = L.layerGroup().addTo(mapaLeaflet);
 
+      const bounds = mapaLeaflet.getBounds();
+
+      const esquinas = [
+        bounds.getSouthWest(),
+        bounds.getNorthWest(),
+        bounds.getNorthEast(),
+        bounds.getSouthEast()
+      ];
+
+      const esquinasUTM = esquinas.map(p => {
+        return latLonAUTMEnZona(p.lat, p.lng, zona);
+      });
+
+      let eMin = Math.min(...esquinasUTM.map(p => p.easting));
+      let eMax = Math.max(...esquinasUTM.map(p => p.easting));
+      let nMin = Math.min(...esquinasUTM.map(p => p.northing));
+      let nMax = Math.max(...esquinasUTM.map(p => p.northing));
+
+      const margenE = (eMax - eMin) * 0.15;
+      const margenN = (nMax - nMin) * 0.15;
+
+      eMin -= margenE;
+      eMax += margenE;
+      nMin -= margenN;
+      nMax += margenN;
+
+      const zoom = mapaLeaflet.getZoom();
+      const paso = obtenerPasoCuadricula(zoom, eMax - eMin, nMax - nMin);
+
+      const eInicio = Math.floor(eMin / paso) * paso;
+      const eFin = Math.ceil(eMax / paso) * paso;
+      const nInicio = Math.floor(nMin / paso) * paso;
+      const nFin = Math.ceil(nMax / paso) * paso;
+
+      const eLineaPunto = Math.round(utmPunto.easting / paso) * paso;
+      const nLineaPunto = Math.round(utmPunto.northing / paso) * paso;
+
       L.marker([lat, lon])
         .addTo(capaCuadricula)
         .bindPopup(`
           <b>Ubicación marcada</b><br>
           Decimal: ${lat.toFixed(6)}, ${lon.toFixed(6)}<br>
-          UTM WGS84: Zona ${utm.zona}${utm.hemisferio}<br>
-          Este: ${utm.easting.toFixed(2)} m<br>
-          Norte: ${utm.northing.toFixed(2)} m
-        `)
-        .openPopup();
+          UTM WGS84: Zona ${zona}${hemisferio}<br>
+          Este: ${utmPunto.easting.toFixed(2)} m<br>
+          Norte: ${utmPunto.northing.toFixed(2)} m
+        `);
 
       if (ultimaUbicacion.accuracy) {
         L.circle([lat, lon], {
@@ -1241,85 +1364,56 @@
         }).addTo(capaCuadricula);
       }
 
-      const paso = 100;
-      const radio = 500;
-
-      const eCentro = Math.round(utm.easting / paso) * paso;
-      const nCentro = Math.round(utm.northing / paso) * paso;
-
-      const limites = [];
-
-      for (let e = eCentro - radio; e <= eCentro + radio; e += paso) {
-        const p1 = utmALatLon(e, nCentro - radio, utm.zona, utm.hemisferio);
-        const p2 = utmALatLon(e, nCentro + radio, utm.zona, utm.hemisferio);
-
-        const esLineaCentro = e === eCentro;
+      for (let e = eInicio; e <= eFin; e += paso) {
+        const esLineaPunto = Math.abs(e - eLineaPunto) < 0.1;
+        const esPrincipal = e % (paso * 5) === 0;
 
         L.polyline(
-          [
-            [p1.lat, p1.lon],
-            [p2.lat, p2.lon]
-          ],
+          crearLineaUTMVertical(e, nInicio, nFin, zona, hemisferio),
           {
-            color: esLineaCentro ? "#dc2626" : "#111",
-            weight: esLineaCentro ? 3 : 1,
-            opacity: esLineaCentro ? 0.95 : 0.55
+            color: esLineaPunto ? "#dc2626" : "#111",
+            weight: esLineaPunto ? 3 : esPrincipal ? 2 : 1,
+            opacity: esLineaPunto ? 0.95 : esPrincipal ? 0.7 : 0.45
           }
         ).addTo(capaCuadricula);
 
-        if (e % 200 === 0) {
-          crearEtiquetaCuadricula(`E ${Math.round(e)}`, p2.lat, p2.lon)
-            .addTo(capaCuadricula);
-        }
+        const pEtiqueta = utmALatLon(e, nFin - paso * 0.35, zona, hemisferio);
 
-        limites.push([p1.lat, p1.lon], [p2.lat, p2.lon]);
+        crearEtiquetaCuadricula(`E ${Math.round(e)}`, pEtiqueta.lat, pEtiqueta.lon)
+          .addTo(capaCuadricula);
       }
 
-      for (let n = nCentro - radio; n <= nCentro + radio; n += paso) {
-        const p1 = utmALatLon(eCentro - radio, n, utm.zona, utm.hemisferio);
-        const p2 = utmALatLon(eCentro + radio, n, utm.zona, utm.hemisferio);
-
-        const esLineaCentro = n === nCentro;
+      for (let n = nInicio; n <= nFin; n += paso) {
+        const esLineaPunto = Math.abs(n - nLineaPunto) < 0.1;
+        const esPrincipal = n % (paso * 5) === 0;
 
         L.polyline(
-          [
-            [p1.lat, p1.lon],
-            [p2.lat, p2.lon]
-          ],
+          crearLineaUTMHorizontal(n, eInicio, eFin, zona, hemisferio),
           {
-            color: esLineaCentro ? "#dc2626" : "#111",
-            weight: esLineaCentro ? 3 : 1,
-            opacity: esLineaCentro ? 0.95 : 0.55
+            color: esLineaPunto ? "#dc2626" : "#111",
+            weight: esLineaPunto ? 3 : esPrincipal ? 2 : 1,
+            opacity: esLineaPunto ? 0.95 : esPrincipal ? 0.7 : 0.45
           }
         ).addTo(capaCuadricula);
 
-        if (n % 200 === 0) {
-          crearEtiquetaCuadricula(`N ${Math.round(n)}`, p2.lat, p2.lon)
-            .addTo(capaCuadricula);
-        }
+        const pEtiqueta = utmALatLon(eInicio + paso * 0.35, n, zona, hemisferio);
 
-        limites.push([p1.lat, p1.lon], [p2.lat, p2.lon]);
+        crearEtiquetaCuadricula(`N ${Math.round(n)}`, pEtiqueta.lat, pEtiqueta.lon)
+          .addTo(capaCuadricula);
       }
 
       datosMapa.innerHTML = `
         <b>Coordenada marcada:</b> ${lat.toFixed(6)}, ${lon.toFixed(6)}<br>
-        <b>Cuadrícula:</b> UTM WGS84 · Zona ${utm.zona}${utm.hemisferio} · cada 100 m<br>
-        <b>Este:</b> ${utm.easting.toFixed(2)} m ·
-        <b>Norte:</b> ${utm.northing.toFixed(2)} m ·
+        <b>UTM WGS84:</b> Zona ${zona}${hemisferio} ·
+        <b>Este:</b> ${utmPunto.easting.toFixed(2)} m ·
+        <b>Norte:</b> ${utmPunto.northing.toFixed(2)} m<br>
+        <b>Cuadrícula dinámica:</b> intervalo ${paso} m · zoom ${zoom}<br>
         <b>Precisión GPS:</b> ${
           ultimaUbicacion.accuracy
             ? "± " + ultimaUbicacion.accuracy.toFixed(1) + " m"
             : "No disponible"
         }
       `;
-
-      mapaLeaflet.fitBounds(limites, {
-        padding: [25, 25]
-      });
-
-      setTimeout(() => {
-        mapaLeaflet.invalidateSize();
-      }, 250);
     }
 
     function abrirMapaCuadricula() {
